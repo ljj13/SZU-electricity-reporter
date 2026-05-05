@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+electricity.log
+electricity_history.csv
+config.json.user
+dist/
+build/
+*.spec

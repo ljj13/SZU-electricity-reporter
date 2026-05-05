@@ -1,0 +1,9 @@
+{
+  "room_name": "",                // 宿舍房间号
+  "room_id": "",                  // 楼栋ID，抓包获取
+  "client": "",                   // 内网IP，抓包获取
+  "interval_day": 14,             // 拉取最近天数
+  "remind_daily": false,          // 是否每日提醒
+  "server_chan_key": "",           // Server酱SendKey
+  "remind_time": 9                // 每日提醒时间（0-23时）
+}
