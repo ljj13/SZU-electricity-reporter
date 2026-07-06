@@ -3,7 +3,6 @@ import sc_sender
 import data_store
 import analysis
 import weather
-import web_report
 
 import json
 import logging
@@ -230,8 +229,6 @@ def job(config: dict = None):
 
         location = f'{building}{room_name}' if building else room_name
         describe = f'{location}电量查询'
-        report_path = web_report.write_report(data, describe, analysis_text)
-        logger.info('已生成网页报告: %s', report_path)
 
         if dry_run:
             logger.info('dry_run=true，已跳过微信推送')

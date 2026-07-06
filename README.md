@@ -11,7 +11,6 @@
 - 气温数据获取（Open-Meteo API，自动关联每天用电）
 - 用电规律分析（周末 vs 工作日、周均、月度趋势、气温相关性）
 - 历史数据持久化（CSV 文件，自动去重）
-- 本地 HTML 报告（report.html）
 - Server酱 Turbo 微信推送
 - 每天最多成功推送一次，开机触发与定时触发共享同一状态
 - 开机静默自启动
@@ -64,8 +63,8 @@ python main.py
 
 - `remind_daily: false` → 查询一次后退出
 - `remind_daily: true` → 常驻后台，每天定时查询并推送
-- `dry_run: true` → 只生成 `report.html`，不消耗 Server酱额度
-- `python main.py --dry-run` → 本次临时只生成报告
+- `dry_run: true` → 只抓取、保存和分析，不发送微信
+- `python main.py --dry-run` → 本次临时不发送微信
 - `python main.py --force` → 忽略今天已成功执行记录，强制运行一次
 - 成功执行后会写入 `last_success_date.txt`，同一天再次开机或到定时时间会自动跳过
 
@@ -97,7 +96,6 @@ C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Start
 | weather.py | 气温数据：Open-Meteo API 地理编码 + 历史气温 |
 | data_store.py | 数据持久化：CSV 读写，自动去重 |
 | analysis.py | 用电规律分析：周末/工作日、周均、月度趋势、气温相关性 |
-| web_report.py | 本地 HTML 报告渲染 |
 | config.json | 配置文件（支持 // 注释） |
 | requirements.txt | Python 依赖 |
 | start_silent.vbs | 无窗口启动脚本（源码运行时使用） |
@@ -109,5 +107,4 @@ C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Start
 - Server酱 Turbo 免费版有每日推送次数限制，可考虑开通会员
 - 电量数据更新有延迟，`remind_time` 不宜设置过早
 - 历史数据保存在 `electricity_history.csv`，日期会按 `YYYY-MM-DD` 保存
-- 本地网页报告保存在 `report.html`
 - 缺少 config.json 时会自动生成模板，填写后重新运行即可
