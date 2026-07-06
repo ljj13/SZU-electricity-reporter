@@ -3,6 +3,7 @@ import sc_sender
 import data_store
 import analysis
 import weather
+import config_gui
 
 import json
 import logging
@@ -27,10 +28,11 @@ logger = logging.getLogger('electricity')
 logger.setLevel(logging.DEBUG)
 
 # 控制台 handler
-_ch = logging.StreamHandler(sys.stdout)
-_ch.setLevel(logging.INFO)
-_ch.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
-logger.addHandler(_ch)
+if sys.stdout:
+    _ch = logging.StreamHandler(sys.stdout)
+    _ch.setLevel(logging.INFO)
+    _ch.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    logger.addHandler(_ch)
 
 # 文件 handler（按天轮转，保留 7 天）
 _fh = TimedRotatingFileHandler(LOG_FILE, when='midnight', backupCount=7, encoding='utf-8')
@@ -78,8 +80,8 @@ CONFIG_TEMPLATE = '''{
   "server_chan_key": "",           // Server酱SendKey
   "remind_time": 9,               // 每日提醒时间（0-23时）
   "city": "",                     // 城市，用于获取气温，可精确到区
-  "dry_run": false,               // true 时只生成网页，不发送微信
-  "low_power_threshold": 20        // 低电量提醒阈值（预留）
+  "dry_run": false,               // true 时只抓取和保存，不发送微信
+  "low_power_threshold": 20        // 低电量提醒阈值
 }
 '''
 
@@ -94,6 +96,8 @@ def _get_config_path():
 def getConfig():
     config_path = _get_config_path()
     if not config_path.exists():
+        if getattr(sys, 'frozen', False):
+            return DEFAULT_CONFIG.copy()
         config_path.write_text(CONFIG_TEMPLATE, encoding='utf-8')
         logger.info('已生成配置模板: %s', config_path)
         logger.error('请填写 config.json 后重新运行')
@@ -304,18 +308,33 @@ def parse_args(argv=None):
     parser.add_argument('--force', action='store_true',
                         help='忽略今天已成功执行记录，强制运行一次')
     parser.add_argument('--dry-run', action='store_true',
-                        help='本次只生成报告，不发送微信')
+                        help='本次只抓取和保存，不发送微信')
+    parser.add_argument('--configure', action='store_true',
+                        help='打开配置窗口并保存 config.json')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    config = getConfig()
+    config_path = _get_config_path()
+    if args.configure and not config_path.exists():
+        config = DEFAULT_CONFIG.copy()
+    else:
+        config = getConfig()
     if args.dry_run:
         config['dry_run'] = True
 
     # 配置校验
     errors = validate_config(config)
+    if args.configure or (getattr(sys, 'frozen', False) and errors):
+        next_config = config_gui.configure(
+            config, DEFAULT_CONFIG, validate_config, _get_config_path(), errors)
+        if next_config is None:
+            logger.error('配置未保存，程序退出')
+            return
+        config = next_config
+        errors = validate_config(config)
+
     if errors:
         for err in errors:
             logger.error('配置错误: %s', err)

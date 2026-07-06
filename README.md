@@ -19,8 +19,9 @@
 
 1. 从 [Releases](https://github.com/ljj13/SZU-electricity-reporter/releases) 下载 `szu-electricity-reporter.exe`
 2. 把 exe 放到一个固定文件夹
-3. 双击运行，会自动生成 `config.json` 模板
-4. 填写 config.json 后再次运行即可
+3. 双击运行，首次会弹出配置窗口
+4. 填写房间号、楼栋 ID、client、Server酱 SendKey 等信息后保存
+5. exe 会把配置记录到同目录的 `config.json`，之后双击即可按配置运行
 
 ## 源码运行
 
@@ -66,6 +67,7 @@ python main.py
 - `dry_run: true` → 只抓取、保存和分析，不发送微信
 - `python main.py --dry-run` → 本次临时不发送微信
 - `python main.py --force` → 忽略今天已成功执行记录，强制运行一次
+- `python main.py --configure` → 打开配置窗口并保存 `config.json`
 - 成功执行后会写入 `last_success_date.txt`，同一天再次开机或到定时时间会自动跳过
 
 ### 4. 打包 exe（可选）
@@ -90,6 +92,7 @@ C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Start
 | 文件 | 说明 |
 |------|------|
 | main.py | 主程序：定时调度、配置校验、日志系统 |
+| config_gui.py | exe / 手动配置窗口 |
 | crawler.py | 爬虫：请求 SIMS 电控系统，带重试和超时 |
 | sc_sender.py | 推送：格式化消息，调用 Server酱 Turbo API |
 | charts.py | 图表 + 预测：QuickChart 折线图、双轴图、线性回归 |
