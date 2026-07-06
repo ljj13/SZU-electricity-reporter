@@ -8,7 +8,10 @@ logger = logging.getLogger('electricity')
 
 
 def _parse_date(mm_dd: str) -> datetime.date:
-    """将 MM-DD 格式转为完整日期，自动判断年份。"""
+    """将 YYYY-MM-DD 或 MM-DD 格式转为完整日期。"""
+    if len(mm_dd) >= 10 and mm_dd[4] == '-' and mm_dd[7] == '-':
+        return datetime.date.fromisoformat(mm_dd[:10])
+
     month, day = map(int, mm_dd.split('-'))
     today = datetime.date.today()
     year = today.year

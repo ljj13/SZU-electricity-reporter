@@ -1,8 +1,8 @@
 import requests
 import datetime
-import re
 import logging
 import time
+from html.parser import HTMLParser
 
 logger = logging.getLogger('electricity')
 
@@ -10,6 +10,42 @@ logger = logging.getLogger('electricity')
 MAX_RETRIES = 3
 RETRY_BACKOFF = [5, 15, 30]  # 每次重试的等待秒数（指数退避）
 REQUEST_TIMEOUT = 10  # 请求超时秒数
+
+
+class _ElectricityTableParser(HTMLParser):
+    """提取电费系统表格中的日期与数值单元格。"""
+
+    def __init__(self):
+        super().__init__()
+        self._capture = None
+        self._parts = []
+        self.date_cells = []
+        self.value_cells = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != 'td':
+            return
+        attrs = {name.lower(): value for name, value in attrs}
+        width = attrs.get('width')
+        align = attrs.get('align', '').lower()
+        if align == 'center' and width in ('13%', '22%'):
+            self._capture = width
+            self._parts = []
+
+    def handle_data(self, data):
+        if self._capture:
+            self._parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() != 'td' or not self._capture:
+            return
+        text = ''.join(self._parts).strip()
+        if self._capture == '22%':
+            self.date_cells.append(text)
+        else:
+            self.value_cells.append(text)
+        self._capture = None
+        self._parts = []
 
 
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
@@ -33,6 +69,26 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
 
     logger.error('请求 %s 已达最大重试次数 (%d)，放弃', url, MAX_RETRIES)
     raise last_exc
+
+
+def parse_table_data(html: str) -> list:
+    """解析电费系统 HTML，返回日期、剩余电量、总用电量、总购电量。"""
+    parser = _ElectricityTableParser()
+    parser.feed(html)
+
+    rows = []
+    row, p = -1, 0
+    for datum in parser.value_cells:
+        if p % 5 == 0:
+            row += 1
+            if row >= len(parser.date_cells):
+                break
+            rows.append([parser.date_cells[row].strip()[:10]])
+        elif p % 5 != 1:
+            rows[row].append(float(datum.strip()))
+        p += 1
+
+    return rows
 
 
 def crawlData(client: str, room_name: str, room_id: str, interval: int = 7) -> list:
@@ -61,23 +117,7 @@ def crawlData(client: str, room_name: str, room_id: str, interval: int = 7) -> l
     response = _request_with_retry('POST', url, data=params)
     html = response.text
 
-    # 匹配需要的表格块
-    raw_e_data = re.findall(
-        r'<td width="13%" align="center">(.*?)</td>', html, re.S)
-    raw_date_data = re.findall(
-        r'<td width="22%" align="center">(.*?)</td>', html, re.S)
-
-    # 清洗数据
-    e_data = []
-    row, p = -1, 0
-    for datum in raw_e_data:
-        if p % 5 == 0:
-            row += 1
-            e_data.append([])
-            e_data[row].append(raw_date_data[row].strip()[:10])
-        elif p % 5 != 1:
-            e_data[row].append(float(datum.strip()))
-        p += 1
+    e_data = parse_table_data(html)
 
     logger.info('成功解析 %d 条电量记录', len(e_data))
     return e_data

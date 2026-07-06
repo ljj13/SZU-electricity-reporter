@@ -57,6 +57,7 @@ def _build_chart_url(labels: list, dataset_label: str, values: list,
             }]
         },
         "options": {
+            "layout": {"padding": {"top": 24, "left": 8, "right": 8}},
             "title": {"display": True, "text": title, "fontColor": "#333",
                       "fontSize": 16},
             "legend": {"labels": {"fontColor": "#333"}},
@@ -88,7 +89,7 @@ def build_rest_chart_url(data: list) -> str:
     ordered = list(reversed(data))
     labels = [row['date'] for row in ordered]
     values = [row['rest'] for row in ordered]
-    y_min, y_max = _calc_range(values)
+    y_min, y_max = _calc_range(values, padding_ratio=0.2)
     return _build_chart_url(labels, '剩余电量(度)', values, '#4FC3F7', '剩余电量趋势', y_min, y_max)
 
 

@@ -43,44 +43,62 @@ def send(key_url: str, data: dict):
       - 新版 (推荐): sendkey，例如 "SCT123456..."
       - 旧版兼容: 完整 URL，例如 "https://sc.ftqq.com/xxx.send"
     """
+    sendkey = _extract_sendkey(key_url)
     if key_url.startswith('http'):
-        sendkey = key_url.rstrip('/').split('/')[-1].replace('.send', '')
         url = f'https://sctapi.ftqq.com/{sendkey}.send'
         logger.info('检测到旧版 Server酱 URL，已自动转换为 Turbo API')
     else:
-        url = f'https://sctapi.ftqq.com/{key_url}.send'
+        url = f'https://sctapi.ftqq.com/{sendkey}.send'
 
     payload = {
         'title': data.get('text', '电量提醒'),
         'desp': data.get('desp', ''),
     }
 
-    logger.info('正在推送至 Server酱 Turbo...')
+    logger.info('正在推送至 Server酱 Turbo: %s', _mask_sendkey(sendkey))
     resp = _request_with_retry('POST', url, data=payload)
     result = resp.json()
 
     if result.get('code') == 0:
         logger.info('Server酱推送成功')
+        return True
     else:
         logger.error('Server酱推送失败: %s', result.get('message', '未知错误'))
+        return False
 
 
-def handle(data: list, describe: str, analysis_text: str = '') -> dict:
+def _extract_sendkey(key_url: str) -> str:
+    if key_url.startswith('http'):
+        return key_url.rstrip('/').split('/')[-1].replace('.send', '')
+    return key_url
+
+
+def _mask_sendkey(sendkey: str) -> str:
+    if len(sendkey) <= 10:
+        return '***'
+    return f'{sendkey[:6]}...{sendkey[-4:]}'
+
+
+def handle(data: list, describe: str, analysis_text: str = '',
+           low_power_threshold: float = None) -> dict:
     """将电量数据格式化为 Server酱 消息格式，包含图表和预测。"""
-    cur_date = time.strftime("%m-%d", time.localtime())
-    if data[-1]['date'] == cur_date:
-        text = '昨日用电{:.2f}度，今日可用{:.2f}度'.format(
-            data[-2]['cost'], data[-1]['rest'])
-    else:
-        text = '电量数据无更新呀'
+    latest = data[0] if data else {}
 
     # ── 预测 ──
     days = charts.predict_days(data)
-    if days > 0:
+    if (low_power_threshold is not None
+            and isinstance(latest.get('rest'), (int, float))
+            and latest['rest'] <= low_power_threshold):
+        text = f'剩余电量 {latest["rest"]:.2f} 度，低于 {low_power_threshold:g} 度阈值'
+        predict_text = '**电量偏低，请尽快充值。**'
+    elif days > 0:
+        text = f'预计还有 {days} 天需要充值电费'
         predict_text = f'**预计还有 {days} 天需要充值电费**'
     elif days == 0:
+        text = '电量即将耗尽，请尽快充值'
         predict_text = '**电量即将耗尽，请尽快充值！**'
     else:
+        text = '暂无法预测充值时间'
         predict_text = '（数据不足，暂无法预测）'
 
     # ── 图表 ──

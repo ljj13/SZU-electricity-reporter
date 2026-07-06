@@ -1,7 +1,11 @@
 __pycache__/
 *.pyc
 electricity.log
+electricity.log.*
 electricity_history.csv
+report.html
+last_success_date.txt
+config.json
 config.json.user
 dist/
 build/

@@ -1,0 +1,12 @@
+{
+  "room_name": "",
+  "room_id": "",
+  "client": "",
+  "interval_day": 14,
+  "remind_daily": false,
+  "server_chan_key": "",
+  "remind_time": 9,
+  "city": "",
+  "dry_run": false,
+  "low_power_threshold": 20
+}

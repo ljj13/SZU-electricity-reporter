@@ -3,14 +3,16 @@ import sc_sender
 import data_store
 import analysis
 import weather
+import web_report
 
 import json
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import argparse
 import signal
 import sys
-import os
 from pathlib import Path
+import datetime
 
 import schedule
 import time
@@ -20,6 +22,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # exe 模式下用 exe 所在目录，否则用脚本所在目录
 APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SCRIPT_DIR
 LOG_FILE = APP_DIR / 'electricity.log'
+RUN_STATE_FILE = APP_DIR / 'last_success_date.txt'
 
 logger = logging.getLogger('electricity')
 logger.setLevel(logging.DEBUG)
@@ -53,6 +56,20 @@ signal.signal(signal.SIGTERM, _shutdown_handler)
 
 
 # ── 配置读取 ─────────────────────────────────────────────
+DEFAULT_CONFIG = {
+    "room_name": "",
+    "room_id": "",
+    "client": "",
+    "interval_day": 14,
+    "remind_daily": False,
+    "server_chan_key": "",
+    "remind_time": 9,
+    "city": "",
+    "dry_run": False,
+    "low_power_threshold": 20,
+}
+
+
 CONFIG_TEMPLATE = '''{
   "room_name": "",                // 宿舍房间号
   "room_id": "",                  // 楼栋ID，抓包获取
@@ -61,7 +78,9 @@ CONFIG_TEMPLATE = '''{
   "remind_daily": false,          // 是否每日提醒
   "server_chan_key": "",           // Server酱SendKey
   "remind_time": 9,               // 每日提醒时间（0-23时）
-  "city": ""                      // 城市，用于获取气温，可精确到区
+  "city": "",                     // 城市，用于获取气温，可精确到区
+  "dry_run": false,               // true 时只生成网页，不发送微信
+  "low_power_threshold": 20        // 低电量提醒阈值（预留）
 }
 '''
 
@@ -91,7 +110,9 @@ def getConfig():
         if idx != -1:
             line = line[:idx] + '\n'
         cleaned.append(line)
-    return json.loads(''.join(cleaned))
+    config = DEFAULT_CONFIG.copy()
+    config.update(json.loads(''.join(cleaned)))
+    return config
 
 
 def validate_config(config: dict) -> list:
@@ -120,11 +141,29 @@ def validate_config(config: dict) -> list:
     return errors
 
 
+def run_once_per_day(task, today: str = None, state_path: Path = RUN_STATE_FILE,
+                     force: bool = False) -> bool:
+    """同一天最多执行一次成功任务；失败不占用当天名额。"""
+    today = today or str(datetime.date.today())
+    state_path = Path(state_path)
+
+    if not force and state_path.exists():
+        last_success = state_path.read_text(encoding='utf-8').strip()
+        if last_success == today:
+            logger.info('今日任务已成功执行过，跳过本次触发')
+            return False
+
+    ok = bool(task())
+    if ok:
+        state_path.write_text(today, encoding='utf-8')
+    return ok
+
+
 # ── 核心任务 ─────────────────────────────────────────────
-def job():
+def job(config: dict = None):
     """执行一次电量查询 + 推送，带异常保护，不会因单次失败退出整个程序。"""
     try:
-        config = getConfig()
+        config = config or getConfig()
         room_name = config['room_name']
         room_id = config['room_id']
         client = config['client']
@@ -148,18 +187,19 @@ def job():
         }
         building = ROOM_ID_MAP.get(room_id, '')
         interval_day = config['interval_day']
-        sc_key = config['server_chan_key']
+        sc_key = config.get('server_chan_key', '')
+        dry_run = config.get('dry_run', False)
 
         if room_name == '' or room_id == '':
             logger.error('未配置 config.json 中的 room_name / room_id')
-            return
+            return False
 
         # 获得数据
         logger.info('开始爬取 %s 电量数据...', room_name)
         table_data = crawler.crawlData(client, room_name, room_id, interval_day)
         if len(table_data) == 0:
             logger.error('爬取数据失败，请检查是否能访问电费查询网站 http://192.168.84.3:9090/cgcSims/')
-            return
+            return False
         logger.info('爬取数据结束，共 %d 条记录', len(table_data))
 
         # 处理数据
@@ -188,16 +228,27 @@ def job():
         analysis_text = analysis.analyze()
         logger.info('分析完成')
 
-        # 若 sc_key 存在，则发送微信提醒
-        if sc_key:
-            location = f'{building}{room_name}' if building else room_name
-            describe = f'ᶘ ᵒᴥᵒᶅ {location}电量查询'
-            send_msg = sc_sender.handle(data, describe, analysis_text)
-            sc_sender.send(key_url=sc_key, data=send_msg)
+        location = f'{building}{room_name}' if building else room_name
+        describe = f'{location}电量查询'
+        report_path = web_report.write_report(data, describe, analysis_text)
+        logger.info('已生成网页报告: %s', report_path)
+
+        if dry_run:
+            logger.info('dry_run=true，已跳过微信推送')
+        elif sc_key:
+            send_msg = sc_sender.handle(
+                data, describe, analysis_text,
+                low_power_threshold=config.get('low_power_threshold'))
+            if not sc_sender.send(key_url=sc_key, data=send_msg):
+                return False
             logger.info('已发送至微信')
+        else:
+            logger.info('未配置 server_chan_key，跳过微信推送')
+        return True
 
     except Exception:
         logger.exception('任务执行异常')
+        return False
 
 
 # ── 数据处理（原逻辑不变） ───────────────────────────────
@@ -251,8 +302,20 @@ def printData(data: list):
 
 
 # ── 主入口 ───────────────────────────────────────────────
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description='SZU 宿舍电量微信提醒')
+    parser.add_argument('--force', action='store_true',
+                        help='忽略今天已成功执行记录，强制运行一次')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='本次只生成报告，不发送微信')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     config = getConfig()
+    if args.dry_run:
+        config['dry_run'] = True
 
     # 配置校验
     errors = validate_config(config)
@@ -265,15 +328,16 @@ def main():
     remind_daily = config.get('remind_daily', False)
     remind_time = config.get('remind_time', 9)
 
-    # 立即执行一次
-    job()
+    # 立即尝试执行一次；若今天已成功执行过，则不会重复消耗推送额度。
+    run_once_per_day(lambda: job(config), force=args.force)
 
     if not remind_daily:
         logger.info('未开启每日提醒，程序退出')
         return
 
     # 使用 schedule 安排每日定时任务
-    schedule.every().day.at(f'{remind_time:02d}:00').do(job)
+    schedule.every().day.at(f'{remind_time:02d}:00').do(
+        run_once_per_day, lambda: job(config))
     logger.info('已开启每日提醒，每天 %02d:00 执行', remind_time)
 
     while _running:

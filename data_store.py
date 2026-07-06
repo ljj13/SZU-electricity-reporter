@@ -1,4 +1,5 @@
 import csv
+import datetime
 import logging
 import sys
 from pathlib import Path
@@ -12,35 +13,90 @@ FIELDS = ['date', 'cost', 'rest', 'charge', 'temp']
 
 
 def save(data: list):
-    """将电量数据追加写入 CSV，自动去重（同一天不重复写）。"""
-    existing_dates = set()
+    """将电量数据写入 CSV；已有日期用新数据补全，缺失日期追加。"""
+    existing_rows = []
+    rows_by_date = {}
     if CSV_FILE.exists():
         with open(CSV_FILE, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                existing_dates.add(row['date'])
+                row['date'] = normalize_date(row.get('date', ''))
+                existing_rows.append(row)
+                rows_by_date[row['date']] = row
 
-    new_rows = [row for row in data if row['date'] not in existing_dates]
-    if not new_rows:
-        logger.info('CSV 中已包含今日数据，跳过写入')
+    added = 0
+    updated = 0
+    for row in data:
+        date = row.get('date')
+        if not date:
+            continue
+        clean = _clean_row(row)
+        date = clean['date']
+        existing = rows_by_date.get(date)
+        if existing is None:
+            existing_rows.append(clean)
+            rows_by_date[date] = clean
+            added += 1
+            continue
+        if _merge_row(existing, clean):
+            updated += 1
+
+    if added == 0 and updated == 0:
+        logger.info('CSV 中已包含最新数据，跳过写入')
         return
 
-    write_header = not CSV_FILE.exists()
-    with open(CSV_FILE, 'a', newline='', encoding='utf-8') as f:
+    with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction='ignore')
-        if write_header:
-            writer.writeheader()
-        for row in new_rows:
-            clean = {}
-            for k in FIELDS:
-                v = row.get(k, '')
-                if isinstance(v, float):
-                    clean[k] = round(v, 2)
-                else:
-                    clean[k] = v if v != '' else ''
-            writer.writerow(clean)
+        writer.writeheader()
+        for row in existing_rows:
+            writer.writerow({k: row.get(k, '') for k in FIELDS})
 
-    logger.info('写入 %d 条新记录到 %s', len(new_rows), CSV_FILE.name)
+    logger.info('CSV 已新增 %d 条、更新 %d 条: %s', added, updated, CSV_FILE.name)
+
+
+def _clean_row(row: dict) -> dict:
+    clean = {}
+    for k in FIELDS:
+        v = row.get(k, '')
+        if k == 'date':
+            clean[k] = normalize_date(v)
+        elif isinstance(v, float):
+            clean[k] = str(round(v, 2))
+        else:
+            clean[k] = v if v != '' else ''
+    return clean
+
+
+def normalize_date(date_str: str, today: datetime.date = None) -> str:
+    """将 YYYY-MM-DD 或 MM-DD 日期归一化为 YYYY-MM-DD。"""
+    date_str = str(date_str).strip()
+    if not date_str:
+        return ''
+    if len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-':
+        return date_str[:10]
+
+    month, day = map(int, date_str[:5].split('-'))
+    today = today or datetime.date.today()
+    year = today.year
+    if month > today.month:
+        year -= 1
+    return f'{year:04d}-{month:02d}-{day:02d}'
+
+
+def same_day(left: str, right: str) -> bool:
+    """比较日期，兼容旧 MM-DD 与新 YYYY-MM-DD。"""
+    return normalize_date(left) == normalize_date(right)
+
+
+def _merge_row(existing: dict, incoming: dict) -> bool:
+    changed = False
+    for key in FIELDS:
+        old = existing.get(key, '')
+        new = incoming.get(key, '')
+        if new not in ('', '-') and old != new:
+            existing[key] = new
+            changed = True
+    return changed
 
 
 def update_temp(date: str, temp: float):
@@ -52,7 +108,8 @@ def update_temp(date: str, temp: float):
     with open(CSV_FILE, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row['date'] == date and not row.get('temp'):
+            row['date'] = normalize_date(row.get('date', ''))
+            if same_day(row['date'], date) and not row.get('temp'):
                 row['temp'] = round(temp, 1)
             rows.append(row)
 
@@ -72,6 +129,7 @@ def load() -> list:
     with open(CSV_FILE, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
+            row['date'] = normalize_date(row.get('date', ''))
             for key in ['cost', 'rest', 'charge', 'temp']:
                 val = row.get(key, '')
                 if val == '-' or val == '':
