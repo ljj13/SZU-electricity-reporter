@@ -7,13 +7,13 @@
 - 每日自动查询宿舍用电数据
 - 剩余电量 / 用电量折线图（QuickChart 云端渲染，Y 轴自适应）
 - 用电量图表叠加气温双轴对比
-- 线性回归预测剩余可用天数（自动跳过充值事件）
-- 气温数据获取（Open-Meteo API，自动关联每天用电）
+- 最近一次充值后按真实日期估算日耗，使用中位数与异常值过滤预测充值时间和合理范围
+- Open-Meteo Forecast API 获取最近 14 天及当天气温，自动关联每天用电
 - 用电规律分析（周末 vs 工作日、周均、月度趋势、气温相关性）
 - 历史数据持久化（CSV 文件，自动去重）
 - Server酱 Turbo 微信推送
 - 每天最多成功推送一次，开机触发与定时触发共享同一状态
-- 开机静默自启动
+- Windows 任务计划：登录时及每天固定时间执行一次，执行结束自动退出
 
 ## 快速开始（exe 版）
 
@@ -53,7 +53,6 @@ config.json 支持 `//` 行尾注释，首次运行会自动生成模板。真�
 | remind_time | 每日提醒时间（0-23 时） | 9 |
 | dry_run | 只抓取、保存和分析，不发送微信 | false |
 | low_power_threshold | 低电量阈值 | 20 |
-| urgent_low_power_repeat | 低电量时允许当天额外提醒一次 | false |
 
 **抓包方法：** 校内网打开 http://192.168.84.3:9090/cgcSims/ ，F12 → Network，选好宿舍后点查询，查看 `selectList.do` 的 POST 参数中的 `roomId`、`roomName`、`client`。
 
@@ -69,6 +68,7 @@ python main.py
 - `python main.py --dry-run` → 本次临时不发送微信
 - `python main.py --force` → 忽略今天已成功执行记录，强制运行一次
 - `python main.py --configure` → 打开配置窗口并保存 `config.json`
+- `python main.py --once` → 处理一次后立即退出，供 Windows 任务计划程序调用
 - 成功执行后会写入 `last_success_date.txt`，同一天再次开机或到定时时间会自动跳过
 - 最近一次失败会写入 `last_error.txt`，exe 无窗口运行时可用它排查问题
 
@@ -81,13 +81,27 @@ pyinstaller --onefile --noconsole --name szu-electricity-reporter --hidden-impor
 
 打包后 exe 在 `dist/` 目录下，把 exe 和 config.json 放同一目录即可运行。
 
-## 开机自启
+## 自动运行
 
-把 exe（或 start_silent.vbs）的快捷方式放到：
+源码版推荐使用 Windows 任务计划，而不是让 Python 进程整天常驻。安装脚本会创建一个任务，包含“登录时”和“每天 09:00”两个触发器，并自动移除旧启动文件夹快捷方式：
 
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_scheduled_task.ps1
 ```
-C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
+
+修改执行时间：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_scheduled_task.ps1 -DailyHour 10
 ```
+
+卸载任务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall_scheduled_task.ps1
+```
+
+任务计划与程序内的单实例锁、每日成功状态共同保证并发触发时也不会重复推送。
 
 ## 文件说明
 
@@ -99,13 +113,15 @@ C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Start
 | buildings.py | 楼栋 ID 到楼栋名映射 |
 | crawler.py | 爬虫：请求 SIMS 电控系统，带重试和超时 |
 | sc_sender.py | 推送：格式化消息，调用 Server酱 Turbo API |
-| charts.py | 图表 + 预测：QuickChart 折线图、双轴图、线性回归 |
-| weather.py | 气温数据：Open-Meteo API 地理编码 + 历史气温 |
+| charts.py | 图表 + 预测：QuickChart 折线图、稳健日耗中位数预测与范围 |
+| weather.py | 气温数据：Open-Meteo Forecast API 近期历史与当天气温 |
 | data_store.py | 数据持久化：CSV 读写，自动去重 |
 | analysis.py | 用电规律分析：周末/工作日、周均、月度趋势、气温相关性 |
 | config.json | 配置文件（支持 // 注释） |
 | requirements.txt | Python 依赖 |
-| start_silent.vbs | 无窗口启动脚本（源码运行时使用） |
+| start_silent.vbs | 无窗口执行一次脚本（源码运行时使用） |
+| install_scheduled_task.ps1 | 安装登录及每日任务计划 |
+| uninstall_scheduled_task.ps1 | 删除任务计划 |
 
 ## 注意事项
 

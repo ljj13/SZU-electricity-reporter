@@ -99,25 +99,39 @@ def _merge_row(existing: dict, incoming: dict) -> bool:
     return changed
 
 
-def update_temp(date: str, temp: float):
-    """更新指定日期的气温数据。"""
-    if not CSV_FILE.exists():
-        return
+def update_temperatures(temperatures: dict) -> int:
+    """批量补全气温数据，只读取和写入 CSV 一次。"""
+    if not CSV_FILE.exists() or not temperatures:
+        return 0
 
     rows = []
+    updated = 0
     with open(CSV_FILE, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             row['date'] = normalize_date(row.get('date', ''))
-            if same_day(row['date'], date) and not row.get('temp'):
-                row['temp'] = round(temp, 1)
+            date_key = row['date'][5:] if len(row['date']) >= 10 else row['date']
+            temp = temperatures.get(row['date'], temperatures.get(date_key))
+            if temp is not None and row.get('temp') in ('', '-', None):
+                row['temp'] = round(float(temp), 1)
+                updated += 1
             rows.append(row)
+
+    if updated == 0:
+        return 0
 
     with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction='ignore')
         writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+        writer.writerows(rows)
+
+    logger.info('批量补全 %d 条气温数据', updated)
+    return updated
+
+
+def update_temp(date: str, temp: float):
+    """兼容旧调用：更新单日气温。"""
+    return update_temperatures({date: temp})
 
 
 def load() -> list:

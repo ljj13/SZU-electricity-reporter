@@ -85,21 +85,34 @@ def handle(data: list, describe: str, analysis_text: str = '',
     latest = data[0] if data else {}
 
     # ── 预测 ──
-    days = charts.predict_days(data)
+    prediction = charts.predict_usage(
+        data, reserve=low_power_threshold or 0)
     if (low_power_threshold is not None
             and isinstance(latest.get('rest'), (int, float))
             and latest['rest'] <= low_power_threshold):
         text = f'剩余电量 {latest["rest"]:.2f} 度，低于 {low_power_threshold:g} 度阈值'
         predict_text = '**电量偏低，请尽快充值。**'
-    elif days > 0:
-        text = f'预计还有 {days} 天需要充值电费'
-        predict_text = f'**预计还有 {days} 天需要充值电费**'
-    elif days == 0:
-        text = '电量即将耗尽，请尽快充值'
-        predict_text = '**电量即将耗尽，请尽快充值！**'
+    elif prediction and prediction.days > 0:
+        text = f'预计还有 {prediction.days} 天需要充值电费'
+        range_text = (
+            f'{prediction.lower_days}～{prediction.upper_days} 天'
+            if prediction.lower_days != prediction.upper_days
+            else f'约 {prediction.days} 天'
+        )
+        predict_text = (
+            f'**预计还有 {prediction.days} 天需要充值电费**\n\n'
+            f'按近期每天约 **{prediction.daily_usage:.1f}** 度估算，'
+            f'合理范围：**{range_text}**。'
+        )
+    elif prediction and prediction.days == 0:
+        text = '电量即将进入充值阈值，请尽快充值'
+        predict_text = (
+            '**电量即将进入充值阈值，请尽快充值！**\n\n'
+            f'近期每天约使用 **{prediction.daily_usage:.1f}** 度。'
+        )
     else:
         text = '暂无法预测充值时间'
-        predict_text = '（数据不足，暂无法预测）'
+        predict_text = '（最近一次充值后的有效数据不足，暂无法预测）'
 
     # ── 图表 ──
     rest_chart_url = charts.build_rest_chart_url(data)

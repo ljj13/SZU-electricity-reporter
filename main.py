@@ -12,6 +12,7 @@ from logging.handlers import TimedRotatingFileHandler
 import argparse
 import signal
 import sys
+import os
 from pathlib import Path
 import datetime
 import traceback
@@ -26,6 +27,7 @@ APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SCRI
 LOG_FILE = APP_DIR / 'electricity.log'
 RUN_STATE_FILE = APP_DIR / 'last_success_date.txt'
 LAST_ERROR_FILE = APP_DIR / 'last_error.txt'
+INSTANCE_LOCK_FILE = APP_DIR / '.electricity.lock'
 
 logger = logging.getLogger('electricity')
 logger.setLevel(logging.DEBUG)
@@ -47,6 +49,52 @@ logger.addHandler(_fh)
 
 # ── 全局标志 ─────────────────────────────────────────────
 _running = True
+
+
+_instance_lock_handle = None
+
+
+def acquire_single_instance_lock() -> bool:
+    """Acquire an OS-backed lock so concurrent triggers cannot both send."""
+    global _instance_lock_handle
+    handle = open(INSTANCE_LOCK_FILE, 'a+b')
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b'\0')
+            handle.flush()
+        handle.seek(0)
+
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False
+
+    _instance_lock_handle = handle
+    return True
+
+
+def release_single_instance_lock():
+    global _instance_lock_handle
+    handle = _instance_lock_handle
+    if handle is None:
+        return
+    try:
+        handle.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+        _instance_lock_handle = None
 
 
 def _shutdown_handler(signum, frame):
@@ -193,15 +241,13 @@ def job(config: dict = None, urgent_only: bool = False):
         # 保存到 CSV
         data_store.save(data)
 
-        # 获取气温数据并更新 CSV（深圳大学南山区）
-        import datetime
-        today = datetime.date.today()
-        start = today - datetime.timedelta(days=interval_day)
-        temp_map = weather.fetch_temperature(str(start), str(today))
+        # Forecast API 可同时提供近期历史和当天数据。
+        temp_map = weather.fetch_temperature(
+            past_days=interval_day, forecast_days=1)
+        data_store.update_temperatures(temp_map)
         for row in data:
             mm_dd = row['date']
             if mm_dd in temp_map:
-                data_store.update_temp(mm_dd, temp_map[mm_dd])
                 row['temp'] = temp_map[mm_dd]
         logger.info('气温数据更新完成')
 
@@ -315,6 +361,8 @@ def parse_args(argv=None):
                         help='本次只抓取和保存，不发送微信')
     parser.add_argument('--configure', action='store_true',
                         help='打开配置窗口并保存 config.json')
+    parser.add_argument('--once', action='store_true',
+                        help='执行一次后退出，供 Windows 任务计划程序调用')
     return parser.parse_args(argv)
 
 
@@ -350,12 +398,12 @@ def main(argv=None):
 
     remind_daily = config.get('remind_daily', False)
     remind_time = config.get('remind_time', 9)
-    repeat_task = None
-    if config.get('urgent_low_power_repeat'):
-        repeat_task = lambda: job(config, urgent_only=True)
+    # 所有触发器共用同一成功状态，每天最多成功推送一次。
+    run_once_per_day(lambda: job(config), force=args.force)
 
-    # 立即尝试执行一次；若今天已成功执行过，则不会重复消耗推送额度。
-    run_once_per_day(lambda: job(config), force=args.force, repeat_task=repeat_task)
+    if args.once:
+        logger.info('单次任务处理完成，程序退出')
+        return
 
     if not remind_daily:
         logger.info('未开启每日提醒，程序退出')
@@ -363,7 +411,7 @@ def main(argv=None):
 
     # 使用 schedule 安排每日定时任务
     schedule.every().day.at(f'{remind_time:02d}:00').do(
-        run_once_per_day, lambda: job(config), repeat_task=repeat_task)
+        run_once_per_day, lambda: job(config))
     logger.info('已开启每日提醒，每天 %02d:00 执行', remind_time)
 
     while _running:
@@ -378,4 +426,10 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    main()
+    if not acquire_single_instance_lock():
+        logger.info('已有一个电量提醒任务正在运行，本次触发退出')
+    else:
+        try:
+            main()
+        finally:
+            release_single_instance_lock()

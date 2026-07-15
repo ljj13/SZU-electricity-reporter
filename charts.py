@@ -1,42 +1,127 @@
+import datetime
 import json
-import urllib.parse
 import logging
+import math
+import statistics
+import urllib.parse
+from dataclasses import dataclass
 
-import numpy as np
 
 logger = logging.getLogger('electricity')
 
 QUICKCHART_BASE = 'https://quickchart.io/chart?c='
 
 
-def predict_days(data: list) -> int:
-    """线性回归预测剩余电量还能用几天。data 最新在前。"""
-    valid = [row for row in data if isinstance(row['rest'], (int, float))]
-    if len(valid) < 2:
-        return -1
+@dataclass(frozen=True)
+class UsagePrediction:
+    days: int
+    daily_usage: float
+    lower_days: int
+    upper_days: int
+    sample_days: int
 
-    ordered = list(reversed(valid))
 
-    last_charge_idx = 0
-    for i in range(1, len(ordered)):
-        if ordered[i]['rest'] > ordered[i - 1]['rest'] + 10:
-            last_charge_idx = i
+def _parse_date(value: str) -> datetime.date:
+    value = str(value).strip()
+    if len(value) >= 10 and value[4] == '-' and value[7] == '-':
+        return datetime.date.fromisoformat(value[:10])
 
-    after_charge = ordered[last_charge_idx:]
-    if len(after_charge) < 2:
-        return -1
+    month, day = map(int, value[:5].split('-'))
+    today = datetime.date.today()
+    year = today.year - (1 if month > today.month else 0)
+    return datetime.date(year, month, day)
 
-    rest_values = np.array([row['rest'] for row in after_charge], dtype=float)
-    x = np.arange(len(rest_values))
-    a, b = np.polyfit(x, rest_values, 1)
 
-    if a >= 0:
-        return -1
+def predict_usage(data: list, reserve: float = 0, max_samples: int = 7):
+    """用最近一次充值后的真实日耗中位数预测充值时间。"""
+    records = []
+    for row in data:
+        if not isinstance(row.get('rest'), (int, float)):
+            continue
+        try:
+            date = _parse_date(row.get('date', ''))
+        except (TypeError, ValueError):
+            continue
+        records.append({
+            'date': date,
+            'rest': float(row['rest']),
+            'charge': row.get('charge'),
+        })
 
-    days_from_start = -b / a
-    days_remaining = days_from_start - (len(rest_values) - 1)
+    records.sort(key=lambda item: item['date'])
+    if len(records) < 2:
+        return None
 
-    return max(0, int(days_remaining))
+    # charge 记录在充值发生前一日；剩余电量明显上升作为兼容判断。
+    start_index = 0
+    for index in range(len(records) - 1):
+        current = records[index]
+        following = records[index + 1]
+        explicit_charge = (
+            isinstance(current['charge'], (int, float))
+            and current['charge'] > 0
+        )
+        rest_jump = following['rest'] > current['rest'] + 10
+        if explicit_charge or rest_jump:
+            start_index = index + 1
+
+    after_charge = records[start_index:]
+    daily_rates = []
+    for previous, current in zip(after_charge, after_charge[1:]):
+        elapsed_days = (current['date'] - previous['date']).days
+        if elapsed_days <= 0:
+            continue
+        daily_usage = (previous['rest'] - current['rest']) / elapsed_days
+        if daily_usage > 0:
+            daily_rates.append(daily_usage)
+
+    daily_rates = daily_rates[-max(2, max_samples):]
+    if len(daily_rates) < 2:
+        return None
+
+    median_usage = statistics.median(daily_rates)
+    deviations = [abs(value - median_usage) for value in daily_rates]
+    mad = statistics.median(deviations)
+    if mad > 0:
+        robust_limit = max(3 * 1.4826 * mad, median_usage * 0.35)
+        filtered = [
+            value for value in daily_rates
+            if abs(value - median_usage) <= robust_limit
+        ]
+        if len(filtered) >= 2:
+            daily_rates = filtered
+            median_usage = statistics.median(daily_rates)
+            deviations = [abs(value - median_usage) for value in daily_rates]
+            mad = statistics.median(deviations)
+
+    if median_usage <= 0:
+        return None
+
+    current_rest = records[-1]['rest']
+    usable_power = max(0.0, current_rest - max(0.0, float(reserve or 0)))
+    estimated_days = usable_power / median_usage
+
+    # 至少保留 15% 波动，避免样本很接近时给出虚假的精确范围。
+    spread = max(1.4826 * mad, median_usage * 0.15)
+    low_usage = max(0.1, median_usage - spread)
+    high_usage = median_usage + spread
+    lower_days = max(0, math.floor(usable_power / high_usage))
+    upper_days = max(lower_days, math.ceil(usable_power / low_usage))
+    days = max(lower_days, min(upper_days, int(round(estimated_days))))
+
+    return UsagePrediction(
+        days=days,
+        daily_usage=round(median_usage, 2),
+        lower_days=lower_days,
+        upper_days=upper_days,
+        sample_days=len(daily_rates),
+    )
+
+
+def predict_days(data: list, reserve: float = 0) -> int:
+    """兼容旧调用，只返回预计天数。"""
+    prediction = predict_usage(data, reserve=reserve)
+    return prediction.days if prediction else -1
 
 
 def _build_chart_url(labels: list, dataset_label: str, values: list,

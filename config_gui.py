@@ -26,8 +26,6 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
         'low_power_threshold': tk.StringVar(value=str(merged.get('low_power_threshold', 20))),
         'remind_daily': tk.BooleanVar(value=bool(merged.get('remind_daily', False))),
         'dry_run': tk.BooleanVar(value=bool(merged.get('dry_run', False))),
-        'urgent_low_power_repeat': tk.BooleanVar(
-            value=bool(merged.get('urgent_low_power_repeat', False))),
     }
 
     frame = tk.Frame(root, padx=18, pady=16)
@@ -65,18 +63,12 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
         row=row, column=1, sticky='w', pady=(8, 0))
     tk.Checkbutton(frame, text='dry_run（不发送微信）', variable=vars_map['dry_run']).grid(
         row=row + 1, column=1, sticky='w')
-    tk.Checkbutton(
-        frame,
-        text='低电量时允许当天额外提醒一次',
-        variable=vars_map['urgent_low_power_repeat'],
-    ).grid(row=row + 2, column=1, sticky='w')
-
     help_text = (
         '抓包提示：校内网打开 http://192.168.84.3:9090/cgcSims/，'
         '在 Network 里查看 selectList.do 的 roomId、roomName、client。'
     )
     tk.Label(frame, text=help_text, fg='#555', wraplength=440, justify='left').grid(
-        row=row + 3, column=0, columnspan=2, sticky='w', pady=(10, 0))
+        row=row + 2, column=0, columnspan=2, sticky='w', pady=(10, 0))
 
     def on_save(run_after_save: bool):
         try:
@@ -91,7 +83,6 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
                 'low_power_threshold': float(vars_map['low_power_threshold'].get().strip()),
                 'remind_daily': vars_map['remind_daily'].get(),
                 'dry_run': vars_map['dry_run'].get(),
-                'urgent_low_power_repeat': vars_map['urgent_low_power_repeat'].get(),
             })
         except ValueError:
             messagebox.showerror('配置错误', '拉取天数、提醒小时、低电量阈值必须是数字。')
@@ -112,7 +103,7 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
         root.destroy()
 
     buttons = tk.Frame(frame)
-    buttons.grid(row=row + 4, column=0, columnspan=2, sticky='e', pady=(14, 0))
+    buttons.grid(row=row + 3, column=0, columnspan=2, sticky='e', pady=(14, 0))
     tk.Button(buttons, text='取消', command=root.destroy, width=10).grid(
         row=0, column=0, padx=(0, 8))
     tk.Button(buttons, text='保存', command=lambda: on_save(False), width=10).grid(

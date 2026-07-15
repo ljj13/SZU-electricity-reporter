@@ -14,7 +14,6 @@ DEFAULT_CONFIG = {
     "city": "",
     "dry_run": False,
     "low_power_threshold": 20,
-    "urgent_low_power_repeat": False,
 }
 
 
@@ -28,8 +27,7 @@ CONFIG_TEMPLATE = '''{
   "remind_time": 9,               // 每日提醒时间（0-23时）
   "city": "",                    // 城市，用于获取气温，可精确到区
   "dry_run": false,               // true 时只抓取和保存，不发送微信
-  "low_power_threshold": 20,      // 低电量提醒阈值
-  "urgent_low_power_repeat": false // 低电量时允许当天额外提醒一次
+  "low_power_threshold": 20       // 低电量提醒阈值
 }
 '''
 
