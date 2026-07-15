@@ -8,5 +8,6 @@
   "remind_time": 9,
   "city": "",
   "dry_run": false,
-  "low_power_threshold": 20
+  "low_power_threshold": 20,
+  "urgent_low_power_repeat": false
 }

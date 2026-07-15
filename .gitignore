@@ -5,8 +5,10 @@ electricity.log.*
 electricity_history.csv
 report.html
 last_success_date.txt
+last_error.txt
 config.json
 config.json.user
 dist/
 build/
 *.spec
+.planning/

@@ -1,6 +1,7 @@
 import requests
 import datetime
 import logging
+import re
 import time
 from html.parser import HTMLParser
 
@@ -12,40 +13,43 @@ RETRY_BACKOFF = [5, 15, 30]  # 每次重试的等待秒数（指数退避）
 REQUEST_TIMEOUT = 10  # 请求超时秒数
 
 
+def _mask_value(value: str) -> str:
+    value = str(value)
+    if len(value) <= 2:
+        return '**'
+    return '*' * (len(value) - 2) + value[-2:]
+
+
 class _ElectricityTableParser(HTMLParser):
-    """提取电费系统表格中的日期与数值单元格。"""
+    """按表格行提取单元格文本，不依赖页面中的列宽样式。"""
 
     def __init__(self):
         super().__init__()
-        self._capture = None
-        self._parts = []
-        self.date_cells = []
-        self.value_cells = []
+        self._row = None
+        self._cell_parts = None
+        self.rows = []
 
     def handle_starttag(self, tag, attrs):
-        if tag.lower() != 'td':
-            return
-        attrs = {name.lower(): value for name, value in attrs}
-        width = attrs.get('width')
-        align = attrs.get('align', '').lower()
-        if align == 'center' and width in ('13%', '22%'):
-            self._capture = width
-            self._parts = []
+        tag = tag.lower()
+        if tag == 'tr':
+            self._row = []
+        elif tag in ('td', 'th') and self._row is not None:
+            self._cell_parts = []
 
     def handle_data(self, data):
-        if self._capture:
-            self._parts.append(data)
+        if self._cell_parts is not None:
+            self._cell_parts.append(data)
 
     def handle_endtag(self, tag):
-        if tag.lower() != 'td' or not self._capture:
-            return
-        text = ''.join(self._parts).strip()
-        if self._capture == '22%':
-            self.date_cells.append(text)
-        else:
-            self.value_cells.append(text)
-        self._capture = None
-        self._parts = []
+        tag = tag.lower()
+        if tag in ('td', 'th') and self._cell_parts is not None:
+            text = ' '.join(''.join(self._cell_parts).split())
+            self._row.append(text)
+            self._cell_parts = None
+        elif tag == 'tr' and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
 
 
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
@@ -77,16 +81,33 @@ def parse_table_data(html: str) -> list:
     parser.feed(html)
 
     rows = []
-    row, p = -1, 0
-    for datum in parser.value_cells:
-        if p % 5 == 0:
-            row += 1
-            if row >= len(parser.date_cells):
+    for cells in parser.rows:
+        date_index = None
+        date_value = None
+        for index, cell in enumerate(cells):
+            match = re.search(r'\d{4}-\d{2}-\d{2}', cell)
+            if match:
+                date_index = index
+                date_value = match.group(0)
                 break
-            rows.append([parser.date_cells[row].strip()[:10]])
-        elif p % 5 != 1:
-            rows[row].append(float(datum.strip()))
-        p += 1
+
+        # 数据行中日期前依次为：剩余电量、总用电量、总购电量。
+        if date_index is None or date_index < 3:
+            continue
+
+        try:
+            values = [
+                float(value.replace(',', '').strip())
+                for value in cells[date_index - 3:date_index]
+            ]
+        except ValueError:
+            logger.debug('跳过无法解析的电量数据行: %r', cells)
+            continue
+
+        rows.append([date_value, *values])
+
+    if not rows:
+        raise ValueError('电量页面中未找到有效数据行，页面结构或查询结果可能已变化')
 
     return rows
 
@@ -112,7 +133,7 @@ def crawlData(client: str, room_name: str, room_id: str, interval: int = 7) -> l
     }
 
     logger.info('正在请求电量数据: 房间=%s, 楼栋=%s, 范围=%s~%s',
-                room_name, room_id, days_before, today)
+                _mask_value(room_name), room_id, days_before, today)
 
     response = _request_with_retry('POST', url, data=params)
     html = response.text

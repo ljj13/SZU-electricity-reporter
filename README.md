@@ -51,8 +51,9 @@ config.json 支持 `//` 行尾注释，首次运行会自动生成模板。真�
 | remind_daily | 每日自动提醒 | false |
 | server_chan_key | Server酱 SendKey | 空 |
 | remind_time | 每日提醒时间（0-23 时） | 9 |
-| dry_run | 只生成报告，不发送微信 | false |
-| low_power_threshold | 低电量阈值（预留） | 20 |
+| dry_run | 只抓取、保存和分析，不发送微信 | false |
+| low_power_threshold | 低电量阈值 | 20 |
+| urgent_low_power_repeat | 低电量时允许当天额外提醒一次 | false |
 
 **抓包方法：** 校内网打开 http://192.168.84.3:9090/cgcSims/ ，F12 → Network，选好宿舍后点查询，查看 `selectList.do` 的 POST 参数中的 `roomId`、`roomName`、`client`。
 
@@ -69,12 +70,13 @@ python main.py
 - `python main.py --force` → 忽略今天已成功执行记录，强制运行一次
 - `python main.py --configure` → 打开配置窗口并保存 `config.json`
 - 成功执行后会写入 `last_success_date.txt`，同一天再次开机或到定时时间会自动跳过
+- 最近一次失败会写入 `last_error.txt`，exe 无窗口运行时可用它排查问题
 
 ### 4. 打包 exe（可选）
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --noconsole --name szu-electricity-reporter main.py
+pyinstaller --onefile --noconsole --name szu-electricity-reporter --hidden-import tkinter main.py
 ```
 
 打包后 exe 在 `dist/` 目录下，把 exe 和 config.json 放同一目录即可运行。
@@ -93,6 +95,8 @@ C:\Users\{用户名}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Start
 |------|------|
 | main.py | 主程序：定时调度、配置校验、日志系统 |
 | config_gui.py | exe / 手动配置窗口 |
+| config_store.py | 配置读取、保存、默认值、校验 |
+| buildings.py | 楼栋 ID 到楼栋名映射 |
 | crawler.py | 爬虫：请求 SIMS 电控系统，带重试和超时 |
 | sc_sender.py | 推送：格式化消息，调用 Server酱 Turbo API |
 | charts.py | 图表 + 预测：QuickChart 折线图、双轴图、线性回归 |
