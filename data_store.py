@@ -1,13 +1,16 @@
 import csv
 import datetime
 import logging
+import os
 import sys
 from pathlib import Path
 
 logger = logging.getLogger('electricity')
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-APP_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else SCRIPT_DIR
+_env_dir = os.environ.get('SZU_REPORTER_DIR')
+APP_DIR = (Path(_env_dir) if _env_dir else
+           (Path(sys.executable).parent if getattr(sys, 'frozen', False) else SCRIPT_DIR))
 CSV_FILE = APP_DIR / 'electricity_history.csv'
 FIELDS = ['date', 'cost', 'rest', 'charge', 'temp']
 
@@ -135,7 +138,7 @@ def update_temp(date: str, temp: float):
 
 
 def load() -> list:
-    """读取全部历史数据，返回字典列表。"""
+    """读取全部历史数据，返回字典列表（最新日期在前）。"""
     if not CSV_FILE.exists():
         return []
 
@@ -155,4 +158,5 @@ def load() -> list:
                         pass
             rows.append(row)
 
+    rows.sort(key=lambda r: r['date'], reverse=True)
     return rows

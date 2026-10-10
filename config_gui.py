@@ -2,6 +2,15 @@ import json
 from pathlib import Path
 
 
+def merge_gui_config(base_config: dict, gui_values: dict, default_config: dict = None) -> dict:
+    """把 GUI 表单编辑的值合并到已有配置中，完整保留自定义网络出口等未在界面展示的参数。"""
+    merged = (default_config or {}).copy()
+    if base_config:
+        merged.update(base_config)
+    merged.update(gui_values)
+    return merged
+
+
 def configure(config: dict, default_config: dict, validate_func, config_path: Path,
               errors: list = None) -> tuple[dict, bool] | None:
     """Show a small Tkinter config form and save config.json."""
@@ -72,8 +81,7 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
 
     def on_save(run_after_save: bool):
         try:
-            next_config = default_config.copy()
-            next_config.update({
+            gui_values = {
                 'room_name': vars_map['room_name'].get().strip(),
                 'room_id': vars_map['room_id'].get().strip(),
                 'client': vars_map['client'].get().strip(),
@@ -83,7 +91,8 @@ def configure(config: dict, default_config: dict, validate_func, config_path: Pa
                 'low_power_threshold': float(vars_map['low_power_threshold'].get().strip()),
                 'remind_daily': vars_map['remind_daily'].get(),
                 'dry_run': vars_map['dry_run'].get(),
-            })
+            }
+            next_config = merge_gui_config(config, gui_values, default_config)
         except ValueError:
             messagebox.showerror('配置错误', '拉取天数、提醒小时、低电量阈值必须是数字。')
             return

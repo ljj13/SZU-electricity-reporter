@@ -1,54 +1,40 @@
-import requests
-import time
 import logging
+import re
+
+import requests
 
 import charts
+import net_egress
 
 logger = logging.getLogger('electricity')
 
-# 重试配置
-MAX_RETRIES = 3
-RETRY_BACKOFF = [3, 10, 20]
-REQUEST_TIMEOUT = 10
+# 默认重试配置（可被 config.json 覆盖）
+MAX_RETRIES = net_egress.DEFAULT_RETRIES
+REQUEST_TIMEOUT = net_egress.DEFAULT_READ_TIMEOUT
 
 
-def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
-    """带重试和超时的 HTTP 请求。"""
-    kwargs.setdefault('timeout', REQUEST_TIMEOUT)
-    last_exc = None
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            logger.debug('HTTP %s %s (第%d次尝试)', method, url, attempt)
-            resp = requests.request(method, url, **kwargs)
-            resp.raise_for_status()
-            return resp
-        except (requests.RequestException, requests.HTTPError) as e:
-            last_exc = e
-            logger.warning('推送请求失败 (第%d次): %s', attempt, e)
-            if attempt < MAX_RETRIES:
-                wait = RETRY_BACKOFF[attempt - 1]
-                logger.info('%d 秒后重试...', wait)
-                time.sleep(wait)
-
-    logger.error('推送已达最大重试次数 (%d)，放弃', MAX_RETRIES)
-    raise last_exc
+def _mask_url(url: str) -> str:
+    """隐藏 URL 中的 Server酱 SendKey，避免泄露到日志。"""
+    return re.sub(r'(SCT[A-Za-z0-9]{6})[A-Za-z0-9]+', r'\1***', url)
 
 
-def send(key_url: str, data: dict):
+def send(key_url: str, data: dict, egress=None, proxy_url: str = None,
+         fallback_proxy_url: str = None, retries: int = None,
+         timeout: float = None):
     """
     使用 Server酱 Turbo 发送电量数据至微信。
 
     key_url 支持两种格式:
       - 新版 (推荐): sendkey，例如 "SCT123456..."
       - 旧版兼容: 完整 URL，例如 "https://sc.ftqq.com/xxx.send"
+
+    出网方式由 ``egress`` 出口链决定（默认 proxy -> fallback -> direct），
+    校园内网不经过本函数。
     """
     sendkey = _extract_sendkey(key_url)
     if key_url.startswith('http'):
-        url = f'https://sctapi.ftqq.com/{sendkey}.send'
         logger.info('检测到旧版 Server酱 URL，已自动转换为 Turbo API')
-    else:
-        url = f'https://sctapi.ftqq.com/{sendkey}.send'
+    url = f'https://sctapi.ftqq.com/{sendkey}.send'
 
     payload = {
         'title': data.get('text', '电量提醒'),
@@ -56,15 +42,41 @@ def send(key_url: str, data: dict):
     }
 
     logger.info('正在推送至 Server酱 Turbo: %s', _mask_sendkey(sendkey))
-    resp = _request_with_retry('POST', url, data=payload)
-    result = resp.json()
+    try:
+        resp, used = net_egress.request(
+            'POST', url,
+            egress=egress or net_egress.DEFAULT_SPEC,
+            proxy_url=proxy_url,
+            fallback_proxy_url=fallback_proxy_url,
+            retries=MAX_RETRIES if retries is None else retries,
+            read_timeout=REQUEST_TIMEOUT if timeout is None else timeout,
+            data=payload,
+        )
+    except requests.exceptions.HTTPError as exc:
+        # 永久性 HTTP 错误（例如 SendKey 无效）不会重试，这里给出可读结果
+        resp = exc.response
+        if resp is None:
+            raise
+        message = ''
+        try:
+            message = resp.json().get('message', '')
+        except ValueError:
+            message = resp.text[:120]
+        logger.error('Server酱返回 HTTP %s: %s', resp.status_code, message)
+        return False
+
+    logger.info('推送响应来自出口 %s (HTTP %s)', used, resp.status_code)
+    try:
+        result = resp.json()
+    except ValueError:
+        logger.error('Server酱返回非 JSON 响应: %s', resp.text[:200])
+        return False
 
     if result.get('code') == 0:
         logger.info('Server酱推送成功')
         return True
-    else:
-        logger.error('Server酱推送失败: %s', result.get('message', '未知错误'))
-        return False
+    logger.error('Server酱推送失败: %s', result.get('message', '未知错误'))
+    return False
 
 
 def _extract_sendkey(key_url: str) -> str:
@@ -112,7 +124,7 @@ def handle(data: list, describe: str, analysis_text: str = '',
         )
     else:
         text = '暂无法预测充值时间'
-        predict_text = '（最近一次充值后的有效数据不足，暂无法预测）'
+        predict_text = '（有效日耗数据不足，暂无法预测）'
 
     # ── 图表 ──
     rest_chart_url = charts.build_rest_chart_url(data)
