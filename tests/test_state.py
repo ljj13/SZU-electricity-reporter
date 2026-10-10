@@ -70,6 +70,15 @@ class RunOncePerDayTests(unittest.TestCase):
         self.assertEqual(json.loads(self.state.read_text(encoding='utf-8'))['title'],
                          '正式推送')
 
+    def test_missing_key_result_does_not_consume_day(self):
+        def missing_key_task():
+            return {'ok': True, 'update_state': False, 'title': '未配置 server_chan_key，未发送微信'}
+
+        status = main.run_once_per_day(missing_key_task, today='2026-10-09',
+                                       state_path=self.state)
+        self.assertEqual(status, 'success')
+        self.assertFalse(self.state.exists())
+
     def test_task_exception_is_contained(self):
         def boom():
             raise RuntimeError('boom')

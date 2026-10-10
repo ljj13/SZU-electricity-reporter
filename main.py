@@ -410,6 +410,7 @@ def job(config: dict = None):
             logger.info('未配置 server_chan_key，跳过微信推送')
             return {
                 'ok': True,
+                'update_state': False,
                 'title': '未配置 server_chan_key，未发送微信',
                 'location': location,
             }

@@ -128,6 +128,13 @@ class JobIsolationTests(unittest.TestCase):
         self.assertFalse(result['update_state'])
         main.sc_sender.send.assert_not_called()
 
+    def test_missing_server_chan_key_does_not_consume_day(self):
+        with mock.patch.object(main.weather, 'fetch_temperature', return_value={}):
+            result = main.job(make_config(server_chan_key=''))
+        self.assertTrue(result['ok'])
+        self.assertFalse(result.get('update_state'))
+        main.sc_sender.send.assert_not_called()
+
     def test_missing_room_config_returns_failed(self):
         result = main.job(make_config(room_name=''))
         self.assertFalse(result)
