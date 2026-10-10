@@ -45,6 +45,7 @@ $rootWhitelist = @(
     'sc_sender.py',
     'weather.py',
     'README.md',
+    'CHANGELOG.md',
     'LICENSE',
     '.gitignore'
 )

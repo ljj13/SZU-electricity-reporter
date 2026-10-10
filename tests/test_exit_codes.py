@@ -76,6 +76,11 @@ class ExitCodeTests(unittest.TestCase):
         finally:
             sys.stdout = orig_stdout
 
+    def test_version_argument(self):
+        with self.assertRaises(SystemExit) as cm:
+            main.parse_args(['--version'])
+        self.assertEqual(cm.exception.code, 0)
+
 
 class TestPushTests(unittest.TestCase):
     def setUp(self):
