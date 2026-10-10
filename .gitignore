@@ -19,3 +19,8 @@ report.html
 dist/
 build/
 *.spec
+*.log
+.planning/
+deploy/config.yaml
+deploy/mihomo
+

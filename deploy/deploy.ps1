@@ -28,11 +28,75 @@ Write-Host "== 1/3 上传文件到 $target : $RemoteStage =="
 & ssh @sshArgs $target "rm -rf '$RemoteStage' && mkdir -p '$RemoteStage/deploy' '$RemoteStage/tests'"
 if ($LASTEXITCODE -ne 0) { throw 'ssh 连接失败' }
 
+# 根目录文件白名单（严禁上传 config.json / 日志 / 历史数据等凭据与状态文件）
+$rootWhitelist = @(
+    'analysis.py',
+    'buildings.py',
+    'charts.py',
+    'config_gui.py',
+    'config_store.py',
+    'config.example.json',
+    'crawler.py',
+    'data_store.py',
+    'main.py',
+    'net_egress.py',
+    'requirements.txt',
+    'run-once.sh',
+    'sc_sender.py',
+    'weather.py',
+    'README.md',
+    'LICENSE',
+    '.gitignore'
+)
+
+# deploy 目录文件白名单（严禁上传 config.yaml / 日志 / PID 等运行时产物）
+$deployWhitelist = @(
+    'board-install.sh',
+    'egress-install.sh',
+    'egress-start.sh',
+    'egress-status.sh',
+    'egress-stop.sh',
+    'install-cron.sh'
+)
+
 $files = @()
-$files += Get-ChildItem -Path "$repo\*" -File -Force |
-    Where-Object { $_.Extension -in '.py', '.md', '.json', '.txt', '.sh' -or $_.Name -eq '.gitignore' }
-$files += Get-ChildItem -Path (Join-Path $repo 'tests') -File -Filter '*.py'
-$files += Get-ChildItem -Path (Join-Path $repo 'deploy') -File
+foreach ($name in $rootWhitelist) {
+    $itemPath = Join-Path $repo $name
+    if (Test-Path $itemPath -PathType Leaf) {
+        $files += Get-Item $itemPath
+    }
+}
+
+foreach ($name in $deployWhitelist) {
+    $itemPath = Join-Path (Join-Path $repo 'deploy') $name
+    if (Test-Path $itemPath -PathType Leaf) {
+        $files += Get-Item $itemPath
+    }
+}
+
+$files += Get-ChildItem -Path (Join-Path $repo 'tests') -File -Filter '*.py' |
+    Where-Object { $_.FullName -notmatch '[\\/]__pycache__[\\/]' }
+
+# 安全防线：硬编码黑名单断言，绝不允许任何敏感凭据或运行状态文件进入暂存
+$forbiddenPatterns = @(
+    'config.json*',
+    'config.yaml',
+    '*.log*',
+    '*.csv',
+    'last_error*',
+    'last_success*',
+    '*.pid',
+    '*.lock',
+    '*.key',
+    '*.pem'
+)
+foreach ($f in $files) {
+    foreach ($pat in $forbiddenPatterns) {
+        if ($f.Name -like $pat) {
+            throw "安全拦截：禁止上传敏感文件 '$($f.FullName)' 到暂存目录！"
+        }
+    }
+}
 
 foreach ($f in $files) {
     $rel = $f.FullName.Substring($repo.Length + 1).Replace('\', '/')
