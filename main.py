@@ -539,9 +539,13 @@ def run_test_push(config: dict) -> int:
     return EXIT_OK
 
 
+__version__ = '1.1.0'
+
+
 # ── 主入口 ───────────────────────────────────────────────
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='SZU 宿舍电量微信提醒')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     parser.add_argument('--force', action='store_true',
                         help='忽略今天已成功执行记录，强制运行一次')
     parser.add_argument('--dry-run', action='store_true',

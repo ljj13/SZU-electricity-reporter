@@ -163,6 +163,7 @@ bash ~/.local/lib/szu-egress/stop.sh    # 停止专用出口（回滚用）
 
 | 参数 | 说明 |
 |------|------|
+| `--version` | 显示当前版本号并退出 |
 | `--once` | 执行一次后立即退出，供 Windows 任务计划程序或 Linux cron 调用 |
 | `--dry-run` | 本次只抓取数据、计算趋势并更新 CSV，不发送微信推送，不占用当日成功名额 |
 | `--force` | 忽略今日已成功执行的记录，强制运行一次 |
@@ -189,7 +190,7 @@ bash ~/.local/lib/szu-egress/stop.sh    # 停止专用出口（回滚用）
 | `buildings.py` | 楼栋 ID 到楼栋名映射表 |
 | `run-once.sh` | Linux 定时任务包装脚本：出口自愈、日志轮转、硬超时与退出码透传 |
 | `deploy/` | 部署与运维工具：专用出口管理、cron 安装、板端与远程安装脚本 |
-| `tests/` | 自动化测试套件：68 项涵盖网络出口、重试、爬虫、去重状态机、异常隔离与退出码 |
+| `tests/` | 自动化测试套件：81 项涵盖网络出口、重试、爬虫、去重状态机、异常隔离与退出码 |
 | `docs/` | 验证记录与运维归档（包含 2026-10-09 实测与排障记录） |
 | `install_scheduled_task.ps1` | Windows 登录及每日任务计划安装脚本 |
 | `uninstall_scheduled_task.ps1` | Windows 任务计划卸载脚本 |
@@ -203,4 +204,5 @@ bash ~/.local/lib/szu-egress/stop.sh    # 停止专用出口（回滚用）
 - `client` 值（内网 IP）可能会发生变化，查询失败时重新抓包更新即可。
 - Server酱 Turbo 免费版有每日推送配额限制。
 - 每日去重状态保存在 `last_success_date.txt`，失败信息保存在 `last_error.txt`（成功后自动归档为 `last_error.resolved.txt`）。
+- **已知限制（POST 超时与跨周期重试）**：因 Server酱 Turbo API 不支持客户端幂等凭据，若推送时遭遇 `ReadTimeout`（请求发出但等待服务商确认超时），程序单次内严禁即时重试与出口轮转，以避免配额耗尽与消息风暴；跨周期（后续 cron 重试）按 At-Least-Once 保障不漏报，若前一次超时实际已由微信送达，跨周期重试可能产生重复通知。
 - 缺少 `config.json` 时会自动生成模板，填写后重新运行即可。
