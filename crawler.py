@@ -63,6 +63,7 @@ def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
         backoff=RETRY_BACKOFF,
         connect_timeout=CONNECT_TIMEOUT,
         read_timeout=REQUEST_TIMEOUT,
+        retry_post_read_timeout=True,
         **kwargs)
     return resp
 

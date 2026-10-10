@@ -144,16 +144,19 @@ def request(method: str, url: str, *, egress, proxy_url: Optional[str] = None,
             connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
             read_timeout: float = DEFAULT_READ_TIMEOUT,
             timeout: Optional[Tuple[float, float]] = None,
+            retry_post_read_timeout: bool = False,
             **kwargs) -> Tuple[requests.Response, str]:
     """按出口链顺序请求，返回 ``(response, 实际使用的出口)``。
 
     每个出口最多尝试 ``retries`` 次、按 ``backoff`` 退避；全部失败时抛出最后一次异常。
+    针对非幂等的 POST 请求，当发生 ReadTimeout 时默认不重试/不切换出口，避免重复推送风险。
     """
     chain = parse_spec(egress)
     urls = proxy_urls(proxy_url, fallback_proxy_url)
     attempts = max(1, int(retries))
     waits = list(backoff) or [0]
     request_timeout = timeout or (connect_timeout, read_timeout)
+    is_post = str(method).strip().upper() == 'POST'
 
     last_exc: Optional[BaseException] = None
     for token in chain:
@@ -183,6 +186,10 @@ def request(method: str, url: str, *, egress, proxy_url: Optional[str] = None,
                     last_exc = exc
                     logger.warning('请求失败 (出口=%s, 第%d次): %s', token, attempt,
                                    short_error(exc))
+                    if is_post and isinstance(exc, requests.exceptions.ReadTimeout) and not retry_post_read_timeout:
+                        logger.warning('POST 请求在等待响应时超时 (%s)，为避免重复推送风险，停止重试与出口切换',
+                                       short_error(exc))
+                        raise
                 if attempt < attempts:
                     wait = waits[min(attempt - 1, len(waits) - 1)]
                     if wait:

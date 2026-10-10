@@ -152,6 +152,49 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(used, 'proxy')
         self.assertEqual(sessions['proxy'].request.call_count, 2)
 
+    def test_post_read_timeout_stops_retries_and_egress_switching(self):
+        # POST 等待响应超时可能远端已处理，为避免重复推送必须立刻停止重试与换出口
+        builder, sessions = self._patch_session({
+            net_egress.EGRESS_PROXY: [requests.exceptions.ReadTimeout('slow read')],
+            net_egress.EGRESS_DIRECT: [make_response(200)],
+        })
+        with mock.patch.object(net_egress, 'build_session', side_effect=builder):
+            with self.assertRaises(requests.exceptions.ReadTimeout):
+                net_egress.request('POST', 'https://example.test/push',
+                                   egress='proxy,direct', retries=3, backoff=[0],
+                                   read_timeout=1, connect_timeout=1)
+        self.assertEqual(sessions['proxy'].request.call_count, 1)
+        self.assertNotIn('direct', sessions)
+
+    def test_post_read_timeout_retries_when_explicitly_enabled(self):
+        # 允许幂等 POST 查询（如内网电量查询）显式开启重试
+        builder, sessions = self._patch_session({
+            net_egress.EGRESS_PROXY: [requests.exceptions.ReadTimeout('slow read'),
+                                      make_response(200)],
+        })
+        with mock.patch.object(net_egress, 'build_session', side_effect=builder):
+            resp, used = net_egress.request('POST', 'https://example.test/query',
+                                            egress='proxy', retries=2, backoff=[0],
+                                            retry_post_read_timeout=True,
+                                            read_timeout=1, connect_timeout=1)
+        self.assertEqual(used, 'proxy')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(sessions['proxy'].request.call_count, 2)
+
+    def test_get_read_timeout_is_retried_normally(self):
+        # GET 是幂等操作，ReadTimeout 正常重试
+        builder, sessions = self._patch_session({
+            net_egress.EGRESS_PROXY: [requests.exceptions.ReadTimeout('slow read'),
+                                      make_response(200)],
+        })
+        with mock.patch.object(net_egress, 'build_session', side_effect=builder):
+            resp, used = net_egress.request('GET', 'https://example.test/weather',
+                                            egress='proxy', retries=2, backoff=[0],
+                                            read_timeout=1, connect_timeout=1)
+        self.assertEqual(used, 'proxy')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(sessions['proxy'].request.call_count, 2)
+
     def test_skips_unconfigured_fallback(self):
         builder, sessions = self._patch_session({
             net_egress.EGRESS_PROXY: [requests.exceptions.ConnectionError('x')],

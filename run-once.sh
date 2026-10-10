@@ -12,6 +12,7 @@ LOG_FILE="$LOG_DIR/cron.log"
 MAX_BYTES=524288
 KEEP_BYTES=262144
 HARD_TIMEOUT="${SZU_RUN_TIMEOUT:-600}"
+PORT="${SZU_EGRESS_PORT:-7899}"
 
 mkdir -p "$LOG_DIR"
 
@@ -25,19 +26,21 @@ rotate_log() {
 }
 
 port_open() {
+  if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+    exec 3<&- 3>&-
+    return 0
+  fi
   if command -v ss >/dev/null 2>&1; then
-    ss -lnt 2>/dev/null | grep -q '127\.0\.0\.1:7899'
+    ss -lnt 2>/dev/null | grep -q "127\.0\.0\.1:$PORT\b"
     return $?
   fi
-  (exec 3<>/dev/tcp/127.0.0.1/7899) 2>/dev/null || return 1
-  exec 3<&- 3>&-
-  return 0
+  return 1
 }
 
 rotate_log
 
 if ! port_open; then
-  echo "[$(date '+%F %T')] 专用出口 127.0.0.1:7899 未监听，尝试启动 $EGRESS_DIR/start.sh" >> "$LOG_FILE"
+  echo "[$(date '+%F %T')] 专用出口 127.0.0.1:$PORT 未监听，尝试启动 $EGRESS_DIR/start.sh" >> "$LOG_FILE"
   if [ -x "$EGRESS_DIR/start.sh" ]; then
     "$EGRESS_DIR/start.sh" >> "$LOG_FILE" 2>&1 \
       || echo "[$(date '+%F %T')] 出口启动失败，继续按备用出口/直连链尝试" >> "$LOG_FILE"
