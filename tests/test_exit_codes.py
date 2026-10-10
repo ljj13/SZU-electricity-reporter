@@ -58,6 +58,24 @@ class ExitCodeTests(unittest.TestCase):
         })
         self.assertEqual(code, main.EXIT_CONFIG)
 
+    def test_help_does_not_crash_on_cp1252_output(self):
+        import io
+        import sys
+        orig_stdout = sys.stdout
+        try:
+            buf = io.BytesIO()
+            fake_stdout = io.TextIOWrapper(buf, encoding='cp1252')
+            sys.stdout = fake_stdout
+            main._ensure_stdio_encoding()
+            with self.assertRaises(SystemExit) as cm:
+                main.parse_args(['--help'])
+            self.assertEqual(cm.exception.code, 0)
+            fake_stdout.flush()
+            output = buf.getvalue().decode('utf-8', errors='replace')
+            self.assertIn('SZU', output)
+        finally:
+            sys.stdout = orig_stdout
+
 
 class TestPushTests(unittest.TestCase):
     def setUp(self):

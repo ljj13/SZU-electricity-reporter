@@ -79,6 +79,37 @@ class RunOncePerDayTests(unittest.TestCase):
         self.assertEqual(status, 'success')
         self.assertFalse(self.state.exists())
 
+    def test_post_read_timeout_allows_retry_in_subsequent_cron_window(self):
+        # 当推送发生 ReadTimeout 时，结果处于未知状态（远端可能处理也可能未处理）。
+        # 此时程序不记录成功状态，以便后续 cron 触发重试（At-Least-Once 语义保障不漏报）；
+        # 一旦重试获得明确成功，则写入状态，后续 cron 自动跳过（Skipped）。
+        outcomes = [False, {'ok': True, 'title': '重试成功'}]
+        attempts = []
+
+        def simulated_cron_task():
+            res = outcomes[len(attempts)]
+            attempts.append(res)
+            return res
+
+        # 第 1 次 cron (09:00)：ReadTimeout 导致任务返回 False
+        status1 = main.run_once_per_day(simulated_cron_task, today='2026-10-09',
+                                        state_path=self.state)
+        self.assertEqual(status1, 'failed')
+        self.assertFalse(self.state.exists())
+
+        # 第 2 次 cron (09:15)：检查发现今日尚未成功，重新尝试并成功
+        status2 = main.run_once_per_day(simulated_cron_task, today='2026-10-09',
+                                        state_path=self.state)
+        self.assertEqual(status2, 'success')
+        self.assertTrue(self.state.exists())
+        self.assertEqual(json.loads(self.state.read_text(encoding='utf-8'))['title'], '重试成功')
+
+        # 第 3 次 cron (09:30)：已明确成功，自动跳过
+        status3 = main.run_once_per_day(simulated_cron_task, today='2026-10-09',
+                                        state_path=self.state)
+        self.assertEqual(status3, 'skipped')
+        self.assertEqual(len(attempts), 2)
+
     def test_task_exception_is_contained(self):
         def boom():
             raise RuntimeError('boom')

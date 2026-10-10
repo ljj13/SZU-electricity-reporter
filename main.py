@@ -26,6 +26,27 @@ import requests
 import schedule
 import time
 
+
+def _ensure_stdio_encoding():
+    """兼顾非中文 Windows 环境（如英文 Windows / CI 中的 cp1252 终端）：
+    当标准流编码无法表达中文时，平滑重配置为 UTF-8，避免输出帮助文本或日志时触发 UnicodeEncodeError。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream and hasattr(stream, 'reconfigure'):
+            try:
+                if stream.encoding:
+                    try:
+                        '中文'.encode(stream.encoding)
+                    except (UnicodeEncodeError, LookupError):
+                        stream.reconfigure(encoding='utf-8')
+                else:
+                    stream.reconfigure(encoding='utf-8')
+            except Exception:
+                pass
+
+
+_ensure_stdio_encoding()
+
 # ── 日志配置 ──────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
 # exe 模式下用 exe 所在目录，否则用脚本所在目录
