@@ -1,0 +1,5 @@
+# 统一为 LF，保证 shell/部署脚本在 Linux 板上可直接执行
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf
