@@ -2,15 +2,17 @@ import requests
 import datetime
 import logging
 import re
-import time
+
+import net_egress
 from html.parser import HTMLParser
 
 logger = logging.getLogger('electricity')
 
-# 重试配置
+# 重试配置（校园内网，短退避）
 MAX_RETRIES = 3
-RETRY_BACKOFF = [5, 15, 30]  # 每次重试的等待秒数（指数退避）
-REQUEST_TIMEOUT = 10  # 请求超时秒数
+RETRY_BACKOFF = [3, 8]  # 每次重试前的等待秒数
+CONNECT_TIMEOUT = 5    # 连接超时秒数
+REQUEST_TIMEOUT = 15   # 读取超时秒数
 
 
 def _mask_value(value: str) -> str:
@@ -53,26 +55,16 @@ class _ElectricityTableParser(HTMLParser):
 
 
 def _request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
-    """带重试和超时的 HTTP 请求。"""
-    kwargs.setdefault('timeout', REQUEST_TIMEOUT)
-    last_exc = None
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            logger.debug('HTTP %s %s (第%d次尝试)', method, url, attempt)
-            resp = requests.request(method, url, **kwargs)
-            resp.raise_for_status()
-            return resp
-        except (requests.RequestException, requests.HTTPError) as e:
-            last_exc = e
-            logger.warning('请求失败 (第%d次): %s', attempt, e)
-            if attempt < MAX_RETRIES:
-                wait = RETRY_BACKOFF[attempt - 1]
-                logger.info('%d 秒后重试...', wait)
-                time.sleep(wait)
-
-    logger.error('请求 %s 已达最大重试次数 (%d)，放弃', url, MAX_RETRIES)
-    raise last_exc
+    """校园内网请求：强制直连出口，带有限重试与显式超时。"""
+    resp, _ = net_egress.request(
+        method, url,
+        egress=net_egress.EGRESS_DIRECT,
+        retries=MAX_RETRIES,
+        backoff=RETRY_BACKOFF,
+        connect_timeout=CONNECT_TIMEOUT,
+        read_timeout=REQUEST_TIMEOUT,
+        **kwargs)
+    return resp
 
 
 def parse_table_data(html: str) -> list:

@@ -33,7 +33,7 @@ def _parse_date(value: str) -> datetime.date:
 
 
 def predict_usage(data: list, reserve: float = 0, max_samples: int = 7):
-    """用最近一次充值后的真实日耗中位数预测充值时间。"""
+    """用最近的真实日耗中位数预测充值时间（充值不改变用电规律）。"""
     records = []
     for row in data:
         if not isinstance(row.get('rest'), (int, float)):
@@ -41,33 +41,20 @@ def predict_usage(data: list, reserve: float = 0, max_samples: int = 7):
         try:
             date = _parse_date(row.get('date', ''))
         except (TypeError, ValueError):
-            continue
+                continue
         records.append({
             'date': date,
             'rest': float(row['rest']),
-            'charge': row.get('charge'),
         })
 
     records.sort(key=lambda item: item['date'])
     if len(records) < 2:
         return None
 
-    # charge 记录在充值发生前一日；剩余电量明显上升作为兼容判断。
-    start_index = 0
-    for index in range(len(records) - 1):
-        current = records[index]
-        following = records[index + 1]
-        explicit_charge = (
-            isinstance(current['charge'], (int, float))
-            and current['charge'] > 0
-        )
-        rest_jump = following['rest'] > current['rest'] + 10
-        if explicit_charge or rest_jump:
-            start_index = index + 1
-
-    after_charge = records[start_index:]
+    # 日耗只取决于相邻两天的剩余电量差，与是否充值无关；
+    # 充值当天剩余电量上升，得到的负日耗会被自然过滤。
     daily_rates = []
-    for previous, current in zip(after_charge, after_charge[1:]):
+    for previous, current in zip(records, records[1:]):
         elapsed_days = (current['date'] - previous['date']).days
         if elapsed_days <= 0:
             continue

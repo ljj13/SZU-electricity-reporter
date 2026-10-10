@@ -1,12 +1,18 @@
 {
-  "room_name": "",
-  "room_id": "",
-  "client": "",
+  "room_name": "宿舍房间号",
+  "room_id": "楼栋ID",
+  "client": "校园内网IP",
   "interval_day": 14,
-  "remind_daily": false,
-  "server_chan_key": "",
+  "remind_daily": true,
+  "server_chan_key": "SCT****************",
   "remind_time": 9,
   "city": "",
   "dry_run": false,
-  "low_power_threshold": 20
+  "low_power_threshold": 20,
+  "proxy_url": "http://127.0.0.1:7899",
+  "proxy_fallback_url": "http://127.0.0.1:7890",
+  "server_chan_egress": "proxy,fallback,direct",
+  "weather_egress": "proxy,fallback,direct",
+  "push_retries": 2,
+  "push_timeout": 20
 }
