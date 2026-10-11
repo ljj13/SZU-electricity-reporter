@@ -72,7 +72,7 @@ pyinstaller --onefile --noconsole --name szu-electricity-reporter --hidden-impor
 
 ---
 
-### 方式三：Linux / 单板计算机（EAIDK-310 等）部署
+### 方式三：Linux / 单板计算机 / 服务器部署
 
 在受限校园网环境下（例如校园内网接口可达，但公网出口到微信推送接口被阻断），程序支持将网络出口配置化：
 
@@ -85,17 +85,17 @@ api.open-meteo.com（天气）  ── proxy(127.0.0.1:7899) -> fallback(127.0.0
 - 核心出网采用显式 `Session(trust_env=False)`，绝不读写系统全局代理，不影响主机其他服务。
 - 专用回环代理（`127.0.0.1:7899`，位于 `deploy/egress-*.sh`）复用现有代理内核与订阅，仅路由 IPv6 节点直达目标。
 
-#### 1. 板端安装
+#### 1. Linux 设备端安装
 
 ```bash
-# 复制源码到板端目录后执行
+# 复制源码到目标设备目录后执行
 bash deploy/board-install.sh /path/to/staging
 ```
 
 或使用 Windows 管理机通过 PowerShell 一键远程部署：
 
 ```powershell
-pwsh -File deploy/deploy.ps1 -Board <板端IP> -User Fog
+pwsh -File deploy/deploy.ps1 -Board <设备IP> -User <用户名>
 ```
 
 #### 2. Linux cron 调度
@@ -104,9 +104,9 @@ pwsh -File deploy/deploy.ps1 -Board <板端IP> -User Fog
 
 ```cron
 # 09:00 起每 15 分钟重试至 12:45，成功一次后自动跳过；开机自动补跑与出口自愈
-@reboot sleep 60 && /home/Fog/.local/lib/szu-egress/start.sh >/dev/null 2>&1
-@reboot sleep 90 && /home/Fog/szu-electricity-reporter/run-once.sh
-*/15 9-12 * * * /home/Fog/szu-electricity-reporter/run-once.sh
+@reboot sleep 60 && $HOME/.local/lib/szu-egress/start.sh >/dev/null 2>&1
+@reboot sleep 90 && $HOME/szu-electricity-reporter/run-once.sh
+*/15 9-12 * * * $HOME/szu-electricity-reporter/run-once.sh
 ```
 
 - `run-once.sh` 具备出口未监听自动拉起自愈、日志自动轮转（≤512KB）、600 秒硬超时兜底和退出码透传。
@@ -146,7 +146,7 @@ bash ~/.local/lib/szu-egress/stop.sh    # 停止专用出口（回滚用）
 
 **抓包方法：** 校内网打开 http://192.168.84.3:9090/cgcSims/ ，F12 → Network，选好宿舍后点查询，查看 `selectList.do` 的 POST 参数中的 `roomId`、`roomName`、`client`。
 
-**网络出口参数（可选，默认值即可适配 Linux 单板）：**
+**网络出口参数（可选，默认值即可适配受限网络环境下的 Linux / 单板设备）：**
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|

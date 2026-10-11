@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  把 szu-electricity-reporter 部署到 EAIDK-310 板（Windows 侧一键脚本）。
+  把 szu-electricity-reporter 部署到 Linux 单板/服务器设备（Windows 侧一键脚本）。
 
 .DESCRIPTION
   1) 将仓库文件（不含 .venv / 日志 / config.json）打包到板上 staging 目录
